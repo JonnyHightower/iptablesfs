@@ -54,3 +54,10 @@ For example, to ACCEPT all packets coming over a VPN, touch /etc/firewall/tun+/A
 
 Don't forget - you need to re-run /etc/init.d/firewall restart after you've finished your changes.
 
+IPv6: in all modes EXCEPT "open", ALL IPv6 packets are dropped in the INPUT and FORWARD chains.
+There is no mechanism currently for managing an IPv6 firewall with this script; it merely ensures
+that the machine will not respond to IPv6.
+
+Contact: jonnyhightower@funkygeek.com
+Updated: 02/04/2013
+

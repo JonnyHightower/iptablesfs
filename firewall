@@ -1,7 +1,10 @@
 #!/bin/bash
 
-# This is the script that implements the firewall policy via iptables
-# Jonathan Roach
+# iptablesfs - the script that implements the firewall policy via iptables
+# Jonny Hightower
+
+#Contact: jonnyhightower@funkygeek.com
+#Updated: 02/04/2013
 
 CONFDIR=/etc/firewall
 VERSION=0.6
@@ -242,7 +245,7 @@ case "$1" in
 	stop)
 	;;
 	*)	
-		echo "J Roach's firewall script version $VERSION"
+		echo "Jonny Hightower's firewall script version $VERSION"
 		echo "Usage: $0 [setup|start|stop|restart|open|seal|rules]"
 esac
  
