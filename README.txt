@@ -38,15 +38,19 @@ Source addresses can be provided in any format iptables understands. It is bad s
 If you're installing this on a remote server over SSH, MAKE SURE YOU ADD A RULE to let you get back in once your established connection has been terminated:
 echo $(echo $SSH_CLIENT | awk {print'$1'}) > /etc/firewall/eth0/tcp/22 && /etc/init.d/firewall restart
 
+/etc/init.d/firewall setup will create multiple directories under /etc/firewall - one for each interface that's up when you run the script. However, you can add rules for further interfaces, even if they aren't up yet. 
 
+For example, to add control for VPN interfaces, you can make a tun+ directory under /etc/firewall, and then create the icmp, tcp and udp directories beneath it.
 
+To ACCEPT ESTABLISHED connections for an interface, simply touch the file ESTABLISHED within the directory for the interface. For example, /etc/firewall/eth0/ESTABLISHED.
 
+You can limit this to just one protocol. For example:
+rm /etc/firewall/eth0/ESTABLISHED && touch /etc/firewall/eth0/tcp/ESTABLISHED
+or
+rm /etc/firewall/eth0/ESTABLISHED && touch /etc/firewall/eth0/icmp/ESTABLISHED
 
+It's the same for ACCEPTing ALL packets on an interface or protocol. Just touch the ACCEPT file.
+For example, to ACCEPT all packets coming over a VPN, touch /etc/firewall/tun+/ACCEPT
 
-
-
-
-
-
-
+Don't forget - you need to re-run /etc/init.d/firewall restart after you've finished your changes.
 
