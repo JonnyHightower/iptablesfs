@@ -1,0 +1,248 @@
+#!/bin/bash
+
+# This is the script that implements the firewall policy via iptables
+# Jonathan Roach
+
+CONFDIR=/etc/firewall
+VERSION=0.6
+# 0.6 Adds protection against sealing the firewall over a remote connection.
+
+# Set TESTMODE to 0 for this script to work.
+TESTMODE=0
+
+# Only try to configure IPv6 if the kernel support it
+USE_IP6=0
+if [ -f "/proc/sys/net/netfilter/nf_conntrack_frag6_timeout" ] || [ -d "/proc/sys/net/ipv6" ]; then
+	USE_IP6=1
+fi
+
+# Internal vars
+_fwPolicySet=0
+ipt=/sbin/iptables
+ip6t=/sbin/ip6tables
+
+[ $USE_IP6 == 1 ] && echo "  Kernel supports IPv6"
+[ $TESTMODE == 1 ] && echo "  RUNNING IN TEST MODE!!"
+
+_6configure() {
+	if [ $USE_IP6 -eq 1 ]; then
+		[ $TESTMODE == 1 ] && echo $ip6t $1
+		[ $TESTMODE == 0 ] && $ip6t $1
+	fi
+}
+_configure() {
+	[ $TESTMODE == 1 ] && echo $ipt $1
+	[ $TESTMODE == 0 ] && $ipt $1
+}
+
+_applyNormalPolicy() {
+	if [ $_fwPolicySet -eq 0 ]; then
+		echo "  Appying default running policy"
+		if [ $TESTMODE == 0 ]; then
+			$ipt -P INPUT DROP
+			[ $USE_IP6 -eq 1 ] && $ip6t -P INPUT DROP
+			$ipt -P OUTPUT ACCEPT
+			[ $USE_IP6 -eq 1 ] && $ip6t -P OUTPUT DROP
+			$ipt -P FORWARD DROP
+			[ $USE_IP6 -eq 1 ] && $ip6t -P FORWARD DROP
+			$ipt -F INPUT
+			[ $USE_IP6 -eq 1 ] && $ip6t -F INPUT
+			$ipt -F OUTPUT
+			[ $USE_IP6 -eq 1 ] && $ip6t -F OUTPUT
+			$ipt -F FORWARD
+			[ $USE_IP6 -eq 1 ] && $ip6t -F FORWARD
+			$ipt -A INPUT -i lo -j ACCEPT
+			[ $USE_IP6 -eq 1 ] && $ip6t -A INPUT -i lo -j ACCEPT
+
+		fi
+		_fwPolicySet=1
+	fi
+}
+
+rules() {
+	echo "** IPv4 **"
+	$ipt -vnL
+	if [ $USE_IP6 -eq 1 ]; then
+		echo "** IPv6 **"
+		$ip6t -vnL
+	fi
+}
+
+start() {
+	echo "Starting firewall [version $VERSION]..."
+	[ ! -d "$CONFDIR" ] && echo "Firewall config directory missing: $CONFDIR" && exit 1
+	policySet=0
+	
+
+	for IFACE in `ls "$CONFDIR"`; do
+		if [ "$IFACE" == "lo" ] || [ ! -d "${CONFDIR}/${IFACE}" ]; then
+			#echo "! Skipping unconfigured interface: $IFACE"
+			continue
+		fi
+		echo "+ Configuring policies for interface: $IFACE"
+
+		if [ -f "${CONFDIR}/${IFACE}/ACCEPT" ]; then
+			# Set the normal policy as soon as the first rule is set up
+			_applyNormalPolicy
+			echo "  $IFACE - accepting ALL incoming connections"
+			_configure "-A INPUT -i ${IFACE} -j ACCEPT"
+			_6configure "-A INPUT -i ${IFACE} -j ACCEPT"
+			continue
+		fi
+
+		if [ -f "${CONFDIR}/${IFACE}/ESTABLISHED" ]; then
+			# Set the normal policy as soon as the first rule is set up
+			_applyNormalPolicy
+			echo "  $IFACE - accepting established connections"
+			_configure "-A INPUT -i ${IFACE} -m state --state ESTABLISHED,RELATED -j ACCEPT"
+			_6configure "-A INPUT -i ${IFACE} -m state --state ESTABLISHED,RELATED -j ACCEPT"
+		fi
+
+		for PROTO in tcp udp; do
+
+			if [ -f "${CONFDIR}/${IFACE}/${PROTO}/ACCEPT" ]; then
+				echo "  $IFACE - accepting ALL incoming $PROTO connections"
+				_configure "-A INPUT -i ${IFACE} -p $PROTO -j ACCEPT"
+				continue
+			fi
+
+			for PORT in `ls "${CONFDIR}/${IFACE}/${PROTO}/"`; do
+				#echo Configuring $PROTO $PORT
+				if false && [ `wc ${CONFDIR}/${IFACE}/${PROTO}/${PORT} | awk {print'$2'}` -eq 0 ]; then
+					echo "  $IFACE - accepting $PROTO connections to port $PORT from ANYWHERE"
+					_configure "-A INPUT -i ${IFACE} -p $PROTO --dport $PORT -j ACCEPT"
+					continue
+				fi				
+				for SRC in `cat ${CONFDIR}/${IFACE}/${PROTO}/${PORT} | grep -v \#`; do
+					# Set the normal policy as soon as the first rule is set up
+					_applyNormalPolicy
+					SIP=`echo $SRC | awk -F: {print'$1'}`
+					SPRT=`echo $SRC | awk -F: {print'$2'}`
+					if [ "$SIP" == "ANY_IP" ]; then
+						echo "  $IFACE - accepting $PROTO connections to port $PORT from ALL IP ADDRESSES"
+						_configure "-A INPUT -i ${IFACE} -p $PROTO --dport $PORT -j ACCEPT"					
+					
+					elif [ ! -z $SPRT ]; then
+						echo "  $IFACE - accepting $PROTO connections to port $PORT from $SIP port $SPRT"
+						_configure "-A INPUT -i ${IFACE} -p $PROTO --dport $PORT -s $SIP --sport $SPRT -j ACCEPT"
+					else
+						echo "  $IFACE - accepting $PROTO connections to port $PORT from $SIP"
+						_configure "-A INPUT -i ${IFACE} -p $PROTO --dport $PORT -s $SIP -j ACCEPT"
+					fi					
+				done
+			done
+		done
+		for PROTO in icmp; do
+
+			if [ -f "${CONFDIR}/${IFACE}/${PROTO}/ACCEPT" ]; then
+				echo "  $IFACE - accepting ALL incoming $PROTO connections"
+				_configure "-A INPUT -i ${IFACE} -p icmp -j ACCEPT"
+				continue
+			fi
+
+			# Type can be numeric or textual. For reference, see the command /sbin/iptables -p icmp -h | less
+			for TYPE in `ls ${CONFDIR}/${IFACE}/${PROTO}/`; do
+				for SRC in `cat ${CONFDIR}/${IFACE}/${PROTO}/$TYPE | grep -v \#`; do
+					# Set the normal policy as soon as the first rule is set up
+					_applyNormalPolicy
+					SIP=`echo $SRC | awk -F: {print'$1'}`
+					if [ "$SIP" == "ANY_IP" ]; then
+						echo "  $IFACE - accepting $PROTO type $TYPE traffic from ALL IP ADDRESSES"
+						_configure "-A INPUT -i ${IFACE} -p icmp --icmp-type $TYPE -j ACCEPT"					
+					else
+						echo "  $IFACE - accepting $PROTO type $TYPE traffic from $SIP"
+						_configure "-A INPUT -i ${IFACE} -p icmp --icmp-type $TYPE -s $SIP -j ACCEPT"
+					fi					
+				done
+			done
+		done
+	done
+	
+}
+
+open() {
+	if [ $TESTMODE == 0 ]; then
+		$ipt -P INPUT ACCEPT
+		$ipt -P OUTPUT ACCEPT
+		$ipt -P FORWARD ACCEPT
+		$ipt -F INPUT
+		[ $USE_IP6 -eq 1 ] && $ip6t -P INPUT ACCEPT
+	else
+		echo "Opening firewall..."
+	fi
+}
+
+realseal() {
+	if [ $TESTMODE == 0 ]; then
+		$ipt -F INPUT
+		$ipt -t nat -F
+		$ipt -F FORWARD
+		$ipt -P INPUT DROP
+		$ipt -P OUTPUT DROP
+		$ipt -P FORWARD DROP
+		echo 0 > /proc/sys/net/ipv4/ip_forward
+		[ $USE_IP6 -eq 1 ] && $ip6t -P INPUT DROP
+	else
+		echo "Blocking all connections through firewall..."
+	fi
+}
+
+seal () {
+	if [ -z $SSH_CLIENT ]; then
+		realseal
+	else
+		echo "*** YOU ARE LOGGED IN REMOTELY. THIS WILL KILL YOUR CONNECTION! ***"
+		echo "*** IF YOU ARE SURE ABOUT THIS, RUN THIS SCRIPT AS FOLLOWS:     ***"
+		echo "*** $0 realseal"
+		echo
+		exit 250
+	fi
+}
+
+setup() {
+	for interface in `/sbin/ifconfig | grep "Link encap" | awk {print'$1'}`; do
+		[ "$interface" == "lo" ] && continue
+		mkdir -p "${CONFDIR}/${interface}/tcp"
+		mkdir -p "${CONFDIR}/${interface}/udp"
+		mkdir -p "${CONFDIR}/${interface}/icmp"
+		
+		echo "ANY_IP" > "${CONFDIR}/${interface}/icmp/echo-reply"
+		echo "ANY_IP" > "${CONFDIR}/${interface}/icmp/destination-unreachable"
+		echo "ANY_IP" > "${CONFDIR}/${interface}/icmp/source-quench"
+		echo "ANY_IP" > "${CONFDIR}/${interface}/icmp/redirect"
+				
+		touch "${CONFDIR}/${interface}/ESTABLISHED"
+	done
+}
+
+
+case "$1" in 
+	setup)
+		setup
+	;;
+	open)
+		open
+	;;
+	start)
+		start
+	;;
+	restart)
+		realseal
+		start
+	;;
+	seal)
+		seal
+	;;
+	realseal)
+		realseal
+	;;
+	rules)
+		rules
+	;;
+	stop)
+	;;
+	*)	
+		echo "J Roach's firewall script version $VERSION"
+		echo "Usage: $0 [setup|start|stop|restart|open|seal|rules]"
+esac
+ 
