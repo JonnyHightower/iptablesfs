@@ -10,7 +10,7 @@ chmod 544 /etc/init.d/firewall
 
 ln -fs /etc/init.d/firewall /etc/rcS.d/S15firewall
 
-cp fwconfig /usr/local/sbin
-chmod 544 /usr/local/sbin/fwconfig
+#cp fwconfig /usr/local/sbin
+#chmod 544 /usr/local/sbin/fwconfig
 
 

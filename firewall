@@ -13,7 +13,7 @@ VERSION=0.6
 # Set TESTMODE to 0 for this script to work.
 TESTMODE=0
 
-# Only try to configure IPv6 if the kernel support it
+# Only try to configure IPv6 if the kernel supports it
 USE_IP6=0
 if [ -f "/proc/sys/net/netfilter/nf_conntrack_frag6_timeout" ] || [ -d "/proc/sys/net/ipv6" ]; then
 	USE_IP6=1
@@ -230,7 +230,6 @@ case "$1" in
 		start
 	;;
 	restart)
-		realseal
 		start
 	;;
 	seal)
